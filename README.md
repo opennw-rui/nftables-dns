@@ -1,7 +1,7 @@
 # nftables-dns
 nftables dns是一个基于azlux/nft-dns的项目，根据MIT许可证进行了修改，原作者链接：https://github.com/azlux/nft-dns
 ## 有哪些改动？
-* 原项目必须在nftables中set已创建的情况下才可以使用，否则进程会报错退出。而本项目新增了`set_type=`，并且可以根据tables, family, set_name, set_type在set不存在时自动创建set（请注意： 这只是为了防止程序退出而改动的，真正要实现set功能的过滤，最好先创建set,否则后期手动添加的规则无法在服务重启后还留存！！！）
+* 原项目必须在nftables中set已创建的情况下才可以使用，否则进程会报错退出。而本项目新增了`set_type=`，并且可以根据tables, family, set_name, set_type在set不存在时自动创建set（请注意： 这只是为了防止程序退出而改动的，真正要实现set功能的过滤，最好先创建set,否则后期手动添加的规则无法在服务重启后还留存！！！目前在考虑是否留存这个功能！！！）
 * 内存管理与性能优化
   * 新增了MemoryOptimizer类，实现了定期垃圾回收和内存清理
   * 调整了GC阈值(gc.set_threshold(700, 10, 10))
