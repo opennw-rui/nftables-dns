@@ -1,7 +1,6 @@
 # nftables-dns
 nftables dns是一个基于azlux/nft-dns的项目，根据MIT许可证进行了修改，原作者链接：https://github.com/azlux/nft-dns
 ## 有哪些改动？
-* 热重载支持：当配置文件内的域名变化后，无需要重启服务，服务到时更新时可自动添加新的ip
 * 增量更新：只同步变化的IP，而非全量替换
 * 减少nft命令执行：缓存机制避免频繁查询set状态
 * 内存管理 - 主动监控和垃圾回收
