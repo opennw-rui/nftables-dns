@@ -112,7 +112,7 @@ systemctl status nft-dns.service
 10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,596 INFO:   /etc/nft-dns.d/nft-dns.conf
 10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,597 INFO:# Parsing the configuration
 10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,603 INFO:Set domain_test does not exist in table filter, creating it
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,606 INFO:Successfully created set domain_test with type ipv4_addr and flags constant,interval
+10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,606 INFO:Successfully created set domain_test with type ipv4_addr and flags interval
 10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,618 INFO:# End of Parsing
 10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,630 INFO:Updating the IPv4 for deb.debian.org with ['146.75.114.132']
 10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,643 INFO:Updating the IPv4 for security.debian.org with ['151.101.130.132', '151.101.194.132', '151.101.2.132', '151.101.66.132']
