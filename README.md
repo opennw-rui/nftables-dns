@@ -27,6 +27,7 @@ table inet filter {
 		size 65536
 		flags interval
 		elements = {
+		# 需要确保set中至少有一个ip才能被链正常使用，因此选择127.0.0.233/32
 		127.0.0.233/32
 }
 }
