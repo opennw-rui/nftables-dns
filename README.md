@@ -36,8 +36,7 @@ table inet filter {
 		type filter hook input priority filter; policy drop;
 		ct state { established, related } counter accept
 		iif "lo" accept
-		ip protocol icmp accept
-		ip saddr @domain ip protocol tcp tcp dport { 22 }  accept
+		ip saddr @domain ip protocol icmp icmp accept
 
 		ip6 nexthdr ipv6-icmp accept
 	}
@@ -84,26 +83,22 @@ systemctl enable nft-dns
 ```bash
 systemctl status nft-dns.service 
 ● nft-dns.service - NFTABLES DNS support
-     Loaded: loaded (/etc/systemd/system/nft-dns.service; disabled; preset: enabled)
-     Active: active (running) since Sun 2025-10-19 10:22:02 CST; 17s ago
- Invocation: baec032fe04545e7a95dcbe99a04d3ad
-   Main PID: 13865 (python3)
-      Tasks: 1 (limit: 37496)
-     Memory: 25.5M (peak: 34M)
-        CPU: 186ms
+     Loaded: loaded (/etc/systemd/system/nft-dns.service; enabled; preset: enabled)
+     Active: active (running) since Sun 2025-10-19 14:21:48 CST; 6min ago
+   Main PID: 164743 (python3)
+      Tasks: 1 (limit: 19084)
+     Memory: 18.4M (peak: 21.2M)
+        CPU: 378ms
      CGroup: /system.slice/nft-dns.service
-             └─13865 python3 /opt/nft-dns/nft-dns.py
+             └─164743 python3 /opt/nft-dns/nft-dns.py
 
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,596 INFO:Only config file with prefix .conf is read
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,596 INFO:Reading config directory : /etc/nft-dns.d
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,596 INFO:   /etc/nft-dns.d/nft-dns.conf
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,597 INFO:# Parsing the configuration
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,603 INFO:Set domain_test does not exist in table filter, creating it
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,606 INFO:Successfully created set domain_test with type ipv4_addr and flags interval
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,618 INFO:# End of Parsing
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,630 INFO:Updating the IPv4 for deb.debian.org with ['146.75.114.132']
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,643 INFO:Updating the IPv4 for security.debian.org with ['151.101.130.132', '151.101.194.132', '151.101.2.132', '151.101.66.132']
-10月 19 10:22:02 ubuntu nft-dns.py[13865]: 2025-10-19 10:22:02,646 INFO:Sleeping for 301s
+Oct 19 14:21:48 access nft-dns.py[164743]: 2025-10-19 14:21:48 INFO:# Parsing the configuration
+Oct 19 14:21:48 access nft-dns.py[164743]: 2025-10-19 14:21:48 INFO:# End of Parsing
+Oct 19 14:21:48 access nft-dns.py[164743]: 2025-10-19 14:21:48 INFO:Updating deb.debian.org with ['146.75.46.132']
+Oct 19 14:21:48 access nft-dns.py[164743]: 2025-10-19 14:21:48 INFO:Restored 1 missing IPs for set domain
+Oct 19 14:21:49 access nft-dns.py[164743]: 2025-10-19 14:21:49 INFO:Updating security.debian.org with ['151.101.130.132', '151.101.194.132', '151.101.2.132', '151.101.66.132']
+Oct 19 14:21:49 access nft-dns.py[164743]: 2025-10-19 14:21:49 INFO:Restored 4 missing IPs for set domain
+Oct 19 14:21:49 access nft-dns.py[164743]: 2025-10-19 14:21:49 INFO:Sleeping for 300s
 ```
 ```bash
 nft list 
