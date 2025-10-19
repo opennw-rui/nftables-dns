@@ -69,11 +69,6 @@ This section modify the program. This section is **optional** and can be removed
   If removed, not include will be done.
   This is the path for custom configuration. It's a **Directory**. All `.conf` files inside this folder will be read as part of the configuration.
 
-- `set_type` (str)
-
-    Default: not set
-    Please write the type of address in the set you want to create, which can be selected from `ipv4_addr` or `ipv6_addr`
-
 ## Other sections
 All others sections are your fqdn resolutions configuration.
 You need at least one section to make this program work. These sections cannot be named "GLOBAL" since it's used by the program itself.
@@ -91,7 +86,6 @@ You need at least one section to make this program work. These sections cannot b
 - `set_name` (str)
 
   This is the Set Name you want to work with. 
-  Unlike the original project azlux/nft-DNS, if the set name you write does not exist, a set will be automatically created based on the tables, family, setname, and setotype in the *.conf file, instead of reporting an error and exiting the program
 
 - `enable` (bool)
 
