@@ -12,6 +12,7 @@ import dns.resolver
 import logging
 import subprocess
 import hashlib
+import re
 
 import entry
 
@@ -33,7 +34,7 @@ class DNSNFTManager:
 
         # 配置文件监控
         self.config_hash = None  # 记录配置文件的哈希值
-        self.config_files_mtime = {}  # 记录配置文件的修改时间
+        self.last_entries_map = {}  # 记录上次的条目映射 {(family, table, set_name, fqdn): entry}
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='DNS plugin for NFTables')
@@ -176,29 +177,61 @@ class DNSNFTManager:
         logging.info(f"# End of Parsing, found {len(self.entries)} entries")
 
     def check_and_reload_config(self):
-        """检查配置文件变化并重新加载"""
+        """检查配置文件变化并重新加载，处理域名增减"""
         if self.has_config_changed():
             logging.info("Configuration changed, reloading...")
 
             # 保存旧的条目信息用于比较
-            old_entries = {(e.family, e.table, e.set_name, e.fqdn): e for e in self.entries}
+            old_entries_map = self.last_entries_map.copy()
 
             # 重新读取配置
+            old_entries = self.entries.copy()
             self.read_config()
 
-            # 找出新增的域名
-            new_entries = {(e.family, e.table, e.set_name, e.fqdn): e for e in self.entries}
-            added_entries = set(new_entries.keys()) - set(old_entries.keys())
+            # 更新当前条目映射
+            current_entries_map = {(e.family, e.table, e.set_name, e.fqdn): e for e in self.entries}
+
+            # 找出新增的域名和删除的域名
+            added_entries = set(current_entries_map.keys()) - set(old_entries_map.keys())
+            removed_entries = set(old_entries_map.keys()) - set(current_entries_map.keys())
 
             # 立即处理新增的域名
             for entry_key in added_entries:
-                entry_item = new_entries[entry_key]
+                entry_item = current_entries_map[entry_key]
                 logging.info(f"New domain detected: {entry_item.fqdn}, processing immediately")
                 # 强制立即解析和同步新域名
                 entry_item.next_update = datetime.now()
 
+            # 处理删除的域名 - 清理对应的IP
+            for entry_key in removed_entries:
+                old_entry = old_entries_map[entry_key]
+                logging.info(f"Domain removed: {old_entry.fqdn}, cleaning up IPs from set")
+                self.cleanup_removed_domain(old_entry)
+
+            # 更新最后条目映射
+            self.last_entries_map = current_entries_map
+
             return True
         return False
+
+    def cleanup_removed_domain(self, removed_entry):
+        """清理被删除域名对应的IP"""
+        if not removed_entry.ip_list:
+            logging.debug(f"No IPs to clean for removed domain {removed_entry.fqdn}")
+            return
+
+        # 获取当前set中的IP
+        current_ips = self.get_current_set_ips(removed_entry, force_refresh=True)
+        removed_ips = set(str(ip) for ip in removed_entry.ip_list)
+
+        # 找出需要删除的IP（只删除该域名对应的IP）
+        ips_to_remove = removed_ips & current_ips
+
+        if ips_to_remove:
+            logging.info(f"Removing {len(ips_to_remove)} IPs for deleted domain {removed_entry.fqdn}")
+            self.safe_delete_element(removed_entry, list(ips_to_remove))
+        else:
+            logging.debug(f"No IPs found to remove for deleted domain {removed_entry.fqdn}")
 
     def run_command(self, cmd):
         """执行系统命令"""
@@ -212,14 +245,65 @@ class DNSNFTManager:
             result = subprocess.run(cmd, capture_output=True, text=True,
                                   check=True, shell=True, timeout=30)
             return result.stdout
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        except subprocess.CalledProcessError as e:
             logging.error(f"Command failed: {e}")
             if hasattr(e, 'stderr') and e.stderr:
                 logging.error(f"stderr: {e.stderr}")
             raise
+        except subprocess.TimeoutExpired as e:
+            logging.error(f"Command timeout: {e}")
+            raise
         except FileNotFoundError:
             logging.error("nft command not found. Use --dry-run to avoid nftable changes")
             sys.exit(1)
+
+    def _parse_nft_elements(self, nft_output):
+        """
+        解析 nft list set 的输出，返回 set of ip strings。
+        能处理单行: elements = { 1.2.3.4, 2.3.4.5 }
+        也能处理多行:
+            elements = {
+                1.2.3.4,
+                2.3.4.5
+            }
+        如果没有 elements 块，则返回空集。
+        """
+        if not nft_output:
+            return set()
+
+        # 找到第一个 `{` 和最后一个 `}` 之间的内容（谨慎）
+        m = re.search(r'elements\s*=\s*\{(.*)\}', nft_output, flags=re.S)
+        if not m:
+            # 可能是 multi-line，没有在同一行匹配到 }, 尝试提取从 'elements = {' 开始直到单独一行 '}' 的内容
+            m2 = re.search(r'elements\s*=\s*\{(.*)', nft_output, flags=re.S)
+            if not m2:
+                return set()
+            # 截取从 m2.start 到末尾，再手工找到第一个独立的 '}' 行
+            tail = nft_output[m2.start():]
+            # 再找匹配的闭合 '}'（第一个匹配）
+            m3 = re.search(r'\{(.*?)}', tail, flags=re.S)
+            if not m3:
+                content = tail
+            else:
+                content = m3.group(1)
+        else:
+            content = m.group(1)
+
+        # content 可能包含换行与注释，按逗号拆分并清理
+        parts = []
+        for piece in re.split(r',', content):
+            piece = piece.strip()
+            # 移除内联注释 (# 后面的)
+            piece = re.sub(r'#.*$', '', piece).strip()
+            if not piece:
+                continue
+            # 只保留看起来像 IP 的内容
+            if re.search(r'[0-9a-fA-F:\.]+', piece):
+                # 清理掉可能残留的花括号或逗号
+                piece = piece.strip(' ,{}')
+                if piece:
+                    parts.append(piece)
+        return set(parts)
 
     def get_current_set_ips(self, entry, force_refresh=False):
         """获取set中当前存在的IP列表（智能缓存）"""
@@ -240,14 +324,7 @@ class DNSNFTManager:
         # 从nftables获取实时数据并更新缓存
         try:
             res = self.run_command(f"nft list set {entry.family} {entry.table} {entry.set_name}")
-            ips = set()
-            for line in res.split('\n'):
-                line = line.strip()
-                if line and not line.startswith(('elements = {', '}')):
-                    ip = line.rstrip(',').split('#')[0].strip()
-                    if ip and ('.' in ip or ':' in ip):
-                        ips.add(ip)
-
+            ips = self._parse_nft_elements(res)
             self.set_cache[cache_key] = ips
             self.cache_last_updated[cache_key] = current_time
             logging.debug(f"Refreshed cache for set {entry.set_name}: {len(ips)} IPs")
@@ -272,7 +349,7 @@ class DNSNFTManager:
         if not entry.ip_list:
             return True
 
-        # 智能缓存：在同步时强制刷新缓存，确保检测到手动删除
+        # 强制刷新缓存，确保检测到手动删除
         current_ips = self.get_current_set_ips(entry, force_refresh=True)
         target_ip_set = set(str(ip) for ip in entry.ip_list)
 
@@ -292,7 +369,7 @@ class DNSNFTManager:
             self.update_set_cache(entry, current_ips | missing_ips)
             logging.info(f"Restored {len(missing_ips)} missing IPs for set {entry.set_name}")
             return True
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             logging.error(f"Failed to restore IPs for set {entry.set_name}: {e}")
             # 命令失败时清除缓存，强制下次刷新
             cache_key = (entry.family, entry.table, entry.set_name)
@@ -307,7 +384,14 @@ class DNSNFTManager:
         if not ip_list:
             return True
 
-        ip_str = ', '.join(str(ip) for ip in ip_list)
+        # 统一清理 ip_list 中的字符串，防止残留大括号等
+        clean_ips = [re.sub(r'[{}\s,]+', '', str(ip)).strip() for ip in ip_list if ip]
+        clean_ips = [ip for ip in clean_ips if ip]
+        if not clean_ips:
+            logging.debug("No valid IPs to delete after cleaning")
+            return True
+
+        ip_str = ', '.join(str(ip) for ip in clean_ips)
         delete_cmd = f"nft delete element {entry.family} {entry.table} {entry.set_name} {{{ip_str}}}"
 
         try:
@@ -315,12 +399,12 @@ class DNSNFTManager:
             # 更新缓存
             cache_key = (entry.family, entry.table, entry.set_name)
             if cache_key in self.set_cache:
-                ip_set = set(str(ip) for ip in ip_list)
+                ip_set = set(clean_ips)
                 self.set_cache[cache_key] = self.set_cache[cache_key] - ip_set
                 self.cache_last_updated[cache_key] = datetime.now()
             return True
         except subprocess.CalledProcessError:
-            # 先添加再删除
+            # 先添加再删除（恢复可能缺失的元素再删）
             add_cmd = f"nft add element {entry.family} {entry.table} {entry.set_name} {{{ip_str}}}"
             try:
                 self.run_command(add_cmd)
@@ -328,12 +412,12 @@ class DNSNFTManager:
                 # 更新缓存
                 cache_key = (entry.family, entry.table, entry.set_name)
                 if cache_key in self.set_cache:
-                    ip_set = set(str(ip) for ip in ip_list)
+                    ip_set = set(clean_ips)
                     self.set_cache[cache_key] = self.set_cache[cache_key] - ip_set
                     self.cache_last_updated[cache_key] = datetime.now()
                 logging.info(f"Recovered set {entry.set_name} operations")
                 return True
-            except subprocess.CalledProcessError as e:
+            except Exception as e:
                 logging.error(f"Failed to recover set {entry.set_name}: {e}")
                 # 命令失败时清除缓存
                 cache_key = (entry.family, entry.table, entry.set_name)
@@ -342,6 +426,9 @@ class DNSNFTManager:
                 if cache_key in self.cache_last_updated:
                     del self.cache_last_updated[cache_key]
                 return False
+        except Exception as e:
+            logging.error(f"Unexpected error while deleting elements: {e}")
+            return False
 
     def update_dns(self):
         """更新DNS解析结果"""
@@ -371,6 +458,10 @@ class DNSNFTManager:
                 if not entry_item.next_update:
                     entry_item.next_update = current_time + timedelta(seconds=min_ttl)
                 continue
+            except Exception as e:
+                logging.error(f"Unexpected DNS error for {entry_item.fqdn}: {e}")
+                entry_item.next_update = current_time + timedelta(seconds=min_ttl)
+                continue
 
             if old_ip_list != new_ip_list:
                 logging.info(f"Updating {entry_item.fqdn} with {new_ip_list}")
@@ -383,16 +474,29 @@ class DNSNFTManager:
             self.sync_set_ips(entry_item)
 
     def get_resolver(self):
-        """获取DNS解析器"""
+        """获取DNS解析器，支持 custom_resolver"""
         if self.config.has_option('GLOBAL', 'custom_resolver'):
-            return dns.resolver.make_resolver_at(self.config['GLOBAL']['custom_resolver'])
+            try:
+                r = dns.resolver.Resolver(configure=False)
+                # 只支持单个地址配置，若配置多个请用逗号分隔并取第一个
+                nameserver = self.config['GLOBAL']['custom_resolver'].strip()
+                if ',' in nameserver:
+                    nameserver = nameserver.split(',')[0].strip()
+                r.nameservers = [nameserver]
+                logging.debug(f"Using custom resolver {nameserver}")
+                return r
+            except Exception as e:
+                logging.warning(f"Failed to configure custom resolver {e}, falling back to system resolver")
         return dns.resolver.Resolver()
 
     def resolve_dns(self, entry_item, resolver):
         """解析DNS记录"""
         rd_type = "A" if entry_item.typeof == 4 else "AAAA"
         answer = resolver.resolve(entry_item.fqdn, rdtype=rd_type, lifetime=10)
-        return sorted(item.address for item in answer.rrset), answer.rrset.ttl
+        # 将返回的结果转换为字符串列表并排序，ttl 取 rrset.ttl
+        ip_list = sorted(str(item.address) for item in answer)
+        ttl = getattr(answer.rrset, 'ttl', 300)
+        return ip_list, ttl
 
     def apply_config_entry(self, entry_item, old_ip_list):
         """应用配置变更"""
@@ -419,8 +523,14 @@ class DNSNFTManager:
                 logging.info(f"Added {len(ips_to_add)} IPs for {entry_item.fqdn}")
                 # 更新缓存
                 self.update_set_cache(entry_item, current_ip_set | ips_to_add)
-            except subprocess.CalledProcessError as e:
+            except Exception as e:
                 logging.error(f"Failed to add IPs for {entry_item.fqdn}: {e}")
+                # 删除缓存，强制下次刷新
+                cache_key = (entry_item.family, entry_item.table, entry_item.set_name)
+                if cache_key in self.set_cache:
+                    del self.set_cache[cache_key]
+                if cache_key in self.cache_last_updated:
+                    del self.cache_last_updated[cache_key]
 
         # 删除旧IP
         if ips_to_delete:
@@ -450,7 +560,10 @@ class DNSNFTManager:
         last_memory_check = datetime.now()
         MEMORY_CHECK_INTERVAL = 300
         last_config_check = datetime.now()
-        CONFIG_CHECK_INTERVAL = 60  # 每60秒检查一次配置变化
+        CONFIG_CHECK_INTERVAL = 30  # 每30秒检查一次配置变化
+
+        # 初始化条目映射
+        self.last_entries_map = {(e.family, e.table, e.set_name, e.fqdn): e for e in self.entries}
 
         while not self.stop:
             current_time = datetime.now()
