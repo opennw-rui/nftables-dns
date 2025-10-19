@@ -110,7 +110,7 @@ def check_and_create_set(family: str, table: str, set_name: str, section: str):
     if set_exists is None:
         logging.info(f"Set {set_name} does not exist in table {table}, creating it")
         
-        # 从配置中获取set_type，如果没有配置则报错
+        # 从配置中获取set_type
         set_type = config[section].get('set_type')
         if not set_type:
             logging.error(f"set_type not defined for section {section}. Please add set_type=ipv4_addr or set_type=ipv6_addr to the configuration")
@@ -121,9 +121,9 @@ def check_and_create_set(family: str, table: str, set_name: str, section: str):
             exit(1)
             
         # 创建set，固定flags为constant,interval
-        create_set_cmd = f"nft add set {family} {table} {set_name} '{{ type {set_type}; flags constant,interval; }}'"
+        create_set_cmd = f"nft add set {family} {table} {set_name} '{{ type {set_type}; flags interval; }}'"
         run_command(create_set_cmd)
-        logging.info(f"Successfully created set {set_name} with type {set_type} and flags constant,interval")
+        logging.info(f"Successfully created set {set_name} with type {set_type} and flags nterval")
 
 
 def update_dns() -> None:
